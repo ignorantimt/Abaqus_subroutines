@@ -1,0 +1,291 @@
+      SUBROUTINE USDFLD(FIELD,STATEV,PNEWDT,DIRECT,T,CELENT,
+     1 TIME,DTIME,CMNAME,ORNAME,NFIELD,NSTATV,NOEL,NPT,LAYER,
+     2 KSPT,KSTEP,KINC,NDI,NSHR,COORD,JMAC,JMATYP,MATLAYO,LACCFLA)
+c
+      INCLUDE 'ABA_PARAM.INC'
+c
+      CHARACTER*80 CMNAME,ORNAME
+      CHARACTER*3  FLGRAY(15)
+      DIMENSION FIELD(NFIELD),STATEV(NSTATV),DIRECT(3,3),
+     1 T(3,3),TIME(2)
+      DIMENSION ARRAY(15),JARRAY(15),JMAC(*),JMATYP(*),COORD(*)
+C     
+      SIGMAPR = STATEV(7) 
+C --- get the maximum principal stress
+      CALL GETVRM('SP',ARRAY,JARRAY,FLGRAY,JRCD,JMAC,JMATYP,
+     1 MATLAYO,LACCFLA)
+      SIGMAPR = ( ABS( ARRAY(3) )+ ARRAY(3) ) / 2
+C --- calculate principal stress value
+!      LSTR = 1
+!	CALL SPRINC(S,PS,LSTR,NDI,NSHR)
+!	SIGMAPR = MAX(PS(1),PS(2),PS(3))    
+C If error, write comment to .DAT file:
+      IF(JRCD.NE.0)THEN
+       WRITE(6,*) 'REQUEST ERROR IN USDFLD FOR ELEMENT NUMBER ',
+     1     NOEL,'INTEGRATION POINT NUMBER ',NPT
+      ENDIF
+C
+      STATEV(7) = SIGMAPR
+C
+      RETURN
+      END
+C****************************************************************
+C   *** ABAQUS UMAT SUBROUTINE ***
+C       This subroutine is very primitive, is a simple planestress, axysimmetric 
+C       elastic problem solver. It is the basic level from which is supposed to
+C       apply the norton law and then the Kachanov-Rabotnov model for multiaxial 
+C       case. The 3D Problem is the same but with more component. 
+C
+CC      STATEV(1) - Von Mises effective stress	
+CC      STATEV(2) - The temperature field
+C************************************************************************************
+
+      SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,RPL,DDSDDT,
+     1                DRPLDE,DRPLDT,STRAN,DSTRAN,TIME,DTIME,TEMP,DTEMP,
+     2                PREDEF,DPRED,CMNAME,NDI,NSHR,NTENS,NSTATV,PROPS,
+     3                NPROPS,COORDS,DROT,PNEWDT,CELENT,DFGRD0,DFGRD1,
+     4                NOEL,NPT,LAYER,KSPT,KSTEP,KINC)
+     
+      INCLUDE 'ABA_PARAM.INC'
+C
+      CHARACTER*8 CMNAME
+      DIMENSION STRESS(NTENS), STATEV(NSTATV),
+     1 DDSDDE(NTENS, NTENS), DDSDDT(NTENS), DRPLDE(NTENS),
+     2 STRAN(NTENS), DSTRAN(NTENS), TIME(2), PREDEF(1), DPRED(1),
+     3 PROPS(NPROPS), COORDS(3), DROT(3,3), DFGRD0(3,3), DFGRD1(3,3)
+C
+      DOUBLE PRECISION YM
+      DIMENSION DSTRESS(NTENS),DCRSTRAN(NTENS),DCRSTRESS(NTENS),
+     1  ESTRAN(NTENS)
+C
+C======STATEV LEGEND ===========================================
+C     STATEV(1) = Von Mises Stress
+C     STATEV(2) = Hydrostatic Pressure
+C     STATEV(3-4-5-6) = Creep strain ec11 ec22 ec33 ec12
+C     STATEV(7) = Maximum principal stress
+C     STATEV(8) = DAMAGE FACTOR OMEGA
+C===============================================================      
+C INITIALISING FLAG
+C
+C     YM=PROPS(1) - Constant Young's modulus. 
+C          For temperature-depedent Young's modulus, let PROPS(1)=0.
+C     PNU - Poisson's ratio
+C
+      YM=PROPS(1) 
+      PNU=PROPS(2)
+C     Secondary creep parameters
+      AA=PROPS(3)
+      AN=PROPS(4)
+C     Tertiary creep parameters
+      BB=PROPS(5)
+      PHI=PROPS(6)
+      CSI=PROPS(7)
+      ALPHA=PROPS(8)
+      OMECR = PROPS(9)
+C
+C INITIALISING STRESSES
+      IF(KSTEP.EQ.1)THEN
+C
+      DO K1=1, NTENS
+         DSTRESS(K1)=0
+      END DO
+C
+
+C DEFINING TERMS FOR JACOBIAN
+C
+      TERM4 = 1-PNU**2
+C
+      TERM1 = YM/TERM4
+C
+      TERM2 = YM*PNU/TERM4
+C     
+      TERM3 = YM*(1.0-PNU)/2./TERM4
+C       
+C FILLING IN JACOBIAN
+C
+      DO K1=1,NDI
+         DDSDDE(K1,K1)=TERM1
+      END DO
+C
+      DO K1=2,NDI
+         N2=K1-1
+         DO K2=1,N2
+            DDSDDE(K2,K1) = TERM2 
+            DDSDDE(K1,K2) = TERM2
+         END DO
+      END DO
+C
+      DO K1=NDI+1,NTENS 	
+         DDSDDE(K1,K1)=TERM3
+      END DO
+      
+
+C COMPUTING STRESS FIELD
+C
+        DO K=1,NTENS
+         DO I=1,NTENS
+            DSTRESS(K) = DSTRESS(K)+DDSDDE(K,I)*DSTRAN(I)
+         END DO
+      END DO
+C
+C UPDATING STRESS TENSOR
+C
+      DO K=1, NTENS
+         STRESS(K) = STRESS(K)+DSTRESS(K)
+      END DO
+C CALCULATE VON MISES STRESS FOR ELASTIC SOLUTION  
+C     HYDROSTATIC PRESSURE " HP "    
+      HP=(DSTRESS(1)+DSTRESS(2)+DSTRESS(3))/3.0
+C     MISES STRESS IS CALCULATED AND STORED
+      V=1.5*((DSTRESS(1)-HP)**2+(DSTRESS(2)-HP)**2+(DSTRESS(3)-HP)**2
+     1   +2*DSTRESS(4)**2+2*DSTRESS(5)**2+2*DSTRESS(6)**2)
+      STATEV(1)= DSQRT(V)
+      STATEV(2)= HP
+      
+      DO K=1,NTENS
+C     SAVING ELASTIC STRAIN COMPONENTS AND STRAIN INCREMENT COMPONENTS     
+      STATEV(14+K)=DSTRAN(K)
+!      STATEV(18+K)=STRAN(K)
+      END DO
+      
+      END IF
+C====================================================================== 
+C     CREEP SECTION     
+      IF(KSTEP.EQ.2)THEN
+C INITIALISING STRESSES
+C
+      IF(KINC.EQ.1)THEN
+      DO K=1, NTENS
+         DCRSTRESS(K)=0
+      END DO
+      ENDIF      
+            
+C DEVIATORIC STRESS IS CALCULATED      
+
+      S11 = STRESS(1)- STATEV(2)
+      S22 = STRESS(2)- STATEV(2)
+      S33 = STRESS(3)- STATEV(2)
+      S12 = STRESS(4)- STATEV(2)
+      
+C CREEP STRAIN CALCULATION 
+C CREEP STRAINS FOR KACHANOV-RABOTNOV MULTIAXIAL METHOD MAXIMUM PRINCIPAL STRESS
+C IS CALCULATED BY USDFLD
+!      CRSTRAN11 = 1.5*AA*((STATEV(1)/(1-STATEV(8)))**(AN-1))
+!     1                                          *(S11/(1-STATEV(8)))
+!      CRSTRAN22 = 1.5*AA*((STATEV(1)/(1-STATEV(8)))**(AN-1))
+!     1                                          *(S22/(1-STATEV(8)))
+!      CRSTRAN33 = 1.5*AA*((STATEV(1)/(1-STATEV(8)))**(AN-1))
+!     1                                          *(S33/(1-STATEV(8)))
+!      CRSTRAN12 = 1.5*AA*((STATEV(1)/(1-STATEV(8)))**(AN-1))
+!     1                                          *(S12/(1-STATEV(8)))
+!C
+!C RUPTURE STRESS MUST BE CALCULATED TO DEVELOP THE CORRECT DAMAGING PROCESS
+!C TWO DIFFERENT STRESSES DRIVE THE FAILURE THE PRINCIPAL MAXIMUM STRESS AND THE
+!C VON MISES STRESS. ALPHA PARAMTER ALLOW TO CONTROL WHICH WILL BE THE MAJOR ONE.
+!      SIGMARR = STATEV(7)*ALPHA + (1-ALPHA)*STATEV(1)
+!      STATEV(9) = SIGMARR
+!C DAMAGE CALCULATION IS PERFORMED, IN THIS CASE THE DAMAGE IS ONLY A SCALAR
+!      DAMAGE = BB*(STATEV(9)**CSI)/((1-STATEV(8))**PHI)
+!      DAMAGE = DAMAGE*DTIME
+!      
+!      STATEV(8) = STATEV(8)+DAMAGE
+!CC    CRITICAL DAMAGE CREATION        
+!      DAMFIN = OMECR+0.01
+!      DAMIN = OMECR-0.5
+!CC    ENDING SIMULATION DUE DAMAGE OCCUR
+!      
+!      IF(STATEV(8).GT.DAMIN)THEN
+!      STATEV(10)=1.0
+!      ENDIF  
+!                      
+!      IF(STATEV(8).GT.DAMFIN)THEN
+!      CALL XIT
+!      GOTO 10
+!      ENDIF
+C CREEP STRAIN IS CALCULATED USING THE NORTON MULTIAXIAL LAW IN THIS CASE
+C NO DAMAGE FACTOR IS PRESENT. THE MECHANISMS IS TOTALLY DRIVEN BY THE VON
+C MISES STRESS
+
+      CRSTRAN11 = (1.5*AA*((STATEV(1))**(AN)))*(S11/STATEV(1))
+      CRSTRAN22 = (1.5*AA*((STATEV(1))**(AN)))*(S22/STATEV(1))
+      CRSTRAN33 = (1.5*AA*((STATEV(1))**(AN)))*(S33/STATEV(1))
+      CRSTRAN12 = (1.5*AA*((STATEV(1))**(AN)))*(S12/STATEV(1))
+
+C NORTON LAW PURE UNIAXIAL CASE
+C SIMPLE BENCHY CASE FOR TESTING
+!      CRSTRAN11 = (AA*((STATEV(1))**(AN)))
+!      CRSTRAN22 = (AA*((STATEV(1))**(AN)))
+!      CRSTRAN33 = (AA*((STATEV(1))**(AN)))
+!      CRSTRAN12 = (AA*((STATEV(1))**(AN)))
+      
+C CREEP STRAIN RATE
+C CREEP STRAIN IS COMPUTED MULTYPLING FOR THE TIME INCREMENT
+C AND STORED IN DCRSTRAN VECTOR WITH NTENS COMPONENT (4 for 2D axisimmetric)      
+      DCRSTRAN11 = CRSTRAN11*DTIME
+      DCRSTRAN22 = CRSTRAN22*DTIME
+      DCRSTRAN33 = CRSTRAN33*DTIME
+      DCRSTRAN12 = CRSTRAN12*DTIME
+      DCRSTRAN(1) = DCRSTRAN11
+      DCRSTRAN(2) = DCRSTRAN22
+      DCRSTRAN(3) = DCRSTRAN33
+      DCRSTRAN(4) = DCRSTRAN12
+      
+C CREEP STRAIN INCREMENT PLOT   
+   
+      STATEV(3)=STATEV(3)+ DCRSTRAN11
+      STATEV(4)=STATEV(4)+ DCRSTRAN22
+      STATEV(5)=STATEV(5)+ DCRSTRAN33
+      STATEV(6)=STATEV(6)+ DCRSTRAN12
+      STATEV(11)=DCRSTRAN11
+      STATEV(12)=DCRSTRAN22
+      STATEV(13)=DCRSTRAN33
+      STATEV(14)=DCRSTRAN12
+      
+           
+C UPDATE STRESS AFTER CREEP INCREMENT
+      DO K=1,NTENS
+         DO I=1,NTENS
+           DSTRESS(K) = DSTRESS(K)+
+     1                  DDSDDE(K,I)*(DSTRAN(K)-STATEV(10+K))
+         END DO
+      END DO
+      STATEV(30) = DSTRAN(2)
+C     HYDROSTATIC PRESSURE " HP "    
+      HP=(DSTRESS(1)+DSTRESS(2)+DSTRESS(3))/3.0
+      STATEV(2)= HP
+C     MISES STRESS IS CALCULATED AND STORED
+      V2=1.5*((DSTRESS(1)- STATEV(2))**2+(DSTRESS(2)- STATEV(2))**2
+     1   +(DSTRESS(3)- STATEV(2))**2
+     2   +2*DSTRESS(4)**2+2*DSTRESS(5)**2+2*DSTRESS(6)**2)
+
+      STATEV(1)= SQRT(V2)
+!      
+      DO K=1,NTENS
+      STRESS(K) = STRESS(K) + DSTRESS(K)
+      END DO
+C UPDATE JACOBIAN
+      DO K1=1,NDI
+         DDSDDE(K1,K1)=DSTRESS(K1)/DSTRAN(K1)
+      END DO
+C
+      DDSDDE (1,2)= DSTRESS(1)/DSTRAN(2) 
+      DDSDDE (1,3)= DSTRESS(1)/DSTRAN(3)   
+      DDSDDE (2,3)= DSTRESS(2)/DSTRAN(3)  
+      DDSDDE (2,1)= DSTRESS(2)/DSTRAN(1) 
+      DDSDDE (3,1)= DSTRESS(3)/DSTRAN(1) 
+      DDSDDE (3,2)= DSTRESS(3)/DSTRAN(2)
+      DDSDDE (1,4)= DSTRESS(1)/DSTRAN(4)
+      DDSDDE (2,4)= DSTRESS(2)/DSTRAN(4)
+      DDSDDE (3,4)= DSTRESS(3)/DSTRAN(4)
+      DDSDDE (4,1)= DSTRESS(4)/DSTRAN(1)
+      DDSDDE (4,2)= DSTRESS(4)/DSTRAN(2)
+      DDSDDE (4,3)= DSTRESS(4)/DSTRAN(3)  
+C
+      DO K1=NDI+1,NTENS 	
+         DDSDDE(K1,K1)=DSTRESS(K1)/DSTRAN(K1)
+      END DO
+      
+      END IF
+10    CONTINUE
+      RETURN
+      END
