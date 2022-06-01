@@ -6,4 +6,4 @@ abaqus subroutines from Internet:
 - UMAT froIsotropic hardening mises placticity.for
 
 
-I will test subroutines one by one in the future and write brief reports here.
+I will test them one by one in the future and write brief reports here.
