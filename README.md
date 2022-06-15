@@ -1,4 +1,4 @@
 # Abaqus_subroutines
 
-Abaqus subroutines that I have used in my model.
+Abaqus subroutines that have been used successfully in my model:
 - usdfld_damage.for
