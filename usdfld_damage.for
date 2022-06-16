@@ -12,27 +12,25 @@ C
       DIMENSION ARRAY(15),JARRAY(15),JMAC(*),JMATYP(*),
      1 COORD(*)
 C
-C Absolute value of current strain:
-      CALL GETVRM('LEP',ARRAY,JARRAY,FLGRAY,JRCD,JMAC,JMATYP,
+C Get PEEQ
+C
+      CALL GETVRM('PE',ARRAY,JARRAY,FLGRAY,JRCD,JMAC,JMATYP,
      1 MATLAYO,LACCFLA)
-!      EPS = ABS( ARRAY(3) )
-C Maximum value of strain up to this point in time:
-!      CALL GETVRM('SDV',ARRAY,JARRAY,FLGRAY,JRCD,JMAC,JMATYP,
-!     1 MATLAYO,LACCFLA)
-!      EPSMAX = ARRAY(1)
-C Use the maximum strain as a field variable
-      FIELD(1) = ARRAY(3)
-C Store the maximum strain as a solution dependent state 
-C variable
+      FIELD(1) = ARRAY(7)
+C
+C Store the PEEQ as a solution dependent state variable
+C
       STATEV(1) = FIELD(1)
-      IF(FIELD(1).GT.0.0195) THEN
+      IF(FIELD(1).GT.0.15) THEN
         IF(STATEV(2).NE.0) THEN
           STATEV(2)=0
           WRITE(16,*) 'ELEMENT',NOEL,'DELETED AFTER INCREMENT',
      1                 KINC,'.'
         END IF
       END IF
+C
 C If error, write comment to .DAT file:
+C
       IF(JRCD.NE.0)THEN
        WRITE(6,*) 'REQUEST ERROR IN USDFLD FOR ELEMENT NUMBER ',
      1     NOEL,'INTEGRATION POINT NUMBER ',NPT
