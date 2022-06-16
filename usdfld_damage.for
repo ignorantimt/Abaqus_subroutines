@@ -11,7 +11,11 @@ C
      1 T(3,3),TIME(2)
       DIMENSION ARRAY(15),JARRAY(15),JMAC(*),JMATYP(*),
      1 COORD(*)
-C
+C------------------------------------------------------------
+C STATEV(1)--PEEQ    | STATEV(2)--Damage flag
+C STATEV(3)--DamageT | STATEV(4)--PEEQ0(damage initiation)
+C STATEV(5)--PEEQ-PEEQ0
+C------------------------------------------------------------
 C Get PEEQ
 C
       CALL GETVRM('PE',ARRAY,JARRAY,FLGRAY,JRCD,JMAC,JMATYP,
@@ -21,17 +25,36 @@ C
 C Store the PEEQ as a solution dependent state variable
 C
       STATEV(1) = FIELD(1)
-      IF(FIELD(1).GT.0.15) THEN
+      STATEV(3) = STATEV(1)/0.15
+C
+C Before damage initiation, store the PEEQ
+C
+      IF(STATEV(3).LT.1) THEN
+        STATEV(4)=STATEV(1)
+C
+C Damage initiation
+C
+      ELSE
+        STATEV(3)=1
+      END IF
+C
+C Damage evolution
+C
+      IF(STATEV(3).NE.1) THEN
+        GOTO 10
+      END IF
+      STATEV(5)=STATEV(1)-STATEV(4)
+      IF(STATEV(5).GT.0.04) THEN
         IF(STATEV(2).NE.0) THEN
           STATEV(2)=0
-          WRITE(16,*) 'ELEMENT',NOEL,'DELETED AFTER INCREMENT',
-     1                 KINC,'.'
+          WRITE(16,*) 'ELEMENT',NOEL,'DELETED AFTER INCREMENT'
+     1                 ,KINC,'.'
         END IF
       END IF
 C
 C If error, write comment to .DAT file:
 C
-      IF(JRCD.NE.0)THEN
+10    IF(JRCD.NE.0)THEN
        WRITE(6,*) 'REQUEST ERROR IN USDFLD FOR ELEMENT NUMBER ',
      1     NOEL,'INTEGRATION POINT NUMBER ',NPT
       ENDIF
